@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from memoryos import Memoryos
 # Import utils directly from the playground directory
 from utils import get_timestamp
+from multimodal.converters.video_converter import VideoConverter
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(16)
@@ -73,11 +74,24 @@ def init_memory():
     api_key = data.get('api_key', '').strip()
     base_url = data.get('base_url', '').strip()
     model = data.get('model_name', '').strip()
+    siliconflow_key = data.get('siliconflow_key', '').strip()
 
     if not user_id or not api_key or not base_url or not model:
         return jsonify({'error': 'User ID, API Key, Base URL, and Model Name are required.'}), 400
     
     assistant_id = f"assistant_{user_id}"
+    embedding_kwargs = {}
+    if siliconflow_key:
+        os.environ['SILICONFLOW_API_KEY'] = siliconflow_key
+        embedding_kwargs = {
+            'use_siliconflow': True,
+            'siliconflow_model': "BAAI/bge-m3"
+        }
+    elif os.environ.get('SILICONFLOW_API_KEY'):
+        embedding_kwargs = {
+            'use_siliconflow': True,
+            'siliconflow_model': "BAAI/bge-m3"
+        }
     
     try:
         # Initialize memoryos for this session
@@ -95,7 +109,8 @@ def init_memory():
             long_term_knowledge_capacity=1000,  # Smaller for demo
             mid_term_heat_threshold=10.0,
             # embedding_model_name="/root/autodl-tmp/embedding_cache/models--BAAI--bge-m3/snapshots/5617a9f61b028005a4858fdac845db406aefb181",  # 降低阈值，更容易触发长期记忆更新（原默认值为5.0）
-            embedding_model_name="BAAI/bge-m3",  # 使用模型名称，会自动下载
+            embedding_model_name="BAAI/bge-m3",  # 使用模型名称，会自动下载或远程请求
+            embedding_model_kwargs=embedding_kwargs,
             llm_model=model
         )
         
@@ -106,7 +121,8 @@ def init_memory():
         session['memory_config'] = {
             'api_key': api_key,
             'base_url': base_url,
-            'model': model
+            'model': model,
+            'embedding_provider': 'siliconflow' if embedding_kwargs.get('use_siliconflow') else 'local'
         }
         
         return jsonify({
@@ -115,7 +131,8 @@ def init_memory():
             'user_id': user_id,
             'assistant_id': assistant_id,
             'model': model,
-            'base_url': base_url
+            'base_url': base_url,
+            'embedding_provider': session['memory_config']['embedding_provider']
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -193,15 +210,87 @@ def add_multimodal_memory_endpoint():
             agent_response = data.get('agent_response')
             converter_kwargs = data.get('converter_kwargs', {})
 
-        result = memory_system.add_multimodal_memory(
-            source,
-            source_type=source_type,
-            converter_type=converter_type,
-            agent_response=agent_response,
-            converter_kwargs=converter_kwargs,
-        )
+        if source_type != 'file_path':
+            return jsonify({'error': 'VideoRAG 目前仅支持 file_path 类型的视频源'}), 400
 
-        return jsonify({'success': True, 'result': result})
+        if converter_type and converter_type != 'video':
+            return jsonify({'error': '当前仅支持 VideoRAG(video) 转换类型'}), 400
+
+        converter_settings = dict(converter_kwargs or {})
+        deepseek_key = converter_settings.pop('deepseek_key', None)
+        silicon_key = converter_settings.pop('siliconflow_key', None)
+        if deepseek_key:
+            os.environ['DEEPSEEK_API_KEY'] = deepseek_key
+        if silicon_key:
+            os.environ['SILICONFLOW_API_KEY'] = silicon_key
+
+        converter_settings.setdefault('working_dir', './videorag-workdir')
+        progress_events = []
+
+        def progress_callback(progress: float, message: str) -> None:
+            progress_events.append({
+                'progress': round(float(progress), 4),
+                'message': message
+            })
+        print(converter_settings)
+        print(f"progress_callback: {progress_callback}")
+        converter = VideoConverter(progress_callback=progress_callback)
+        print(f"converter: {converter}")
+        video_result = converter.convert(
+            source,
+            source_type='file_path',
+            **converter_settings,
+        )
+        print(f"video_result: {video_result}")
+        if video_result.status != 'success':
+            return jsonify({
+                'error': video_result.error or 'VideoRAG 处理失败',
+                'metadata': video_result.metadata,
+                'progress': progress_events
+            }), 500
+
+        conversations = []
+        for chunk in video_result.chunks:
+            chunk_meta = dict(chunk.metadata)
+
+            user_input = chunk_meta.get('transcript') or chunk_meta.get('chunk_summary') or chunk.text
+            user_input = (user_input or '').strip()
+            if chunk_meta.get('chunk_type') == 'videorag_summary':
+                user_input = chunk_meta.get('question', '请总结本视频')
+            if not user_input:
+                user_input = f"[VideoChunk#{chunk.chunk_index}]"
+
+            agent_reply = agent_response or chunk_meta.get('chunk_summary') or chunk.text or chunk_meta.get('transcript')
+            agent_reply = (agent_reply or '').strip()
+            if not agent_reply:
+                agent_reply = '该视频片段未生成可用摘要'
+
+            timestamp = get_timestamp()
+            memory_system.add_memory(
+                user_input=user_input,
+                agent_response=agent_reply,
+                timestamp=timestamp,
+                meta_data={
+                    **chunk_meta,
+                    'chunk_index': chunk.chunk_index,
+                    'converter_provider': 'VideoRAG'
+                }
+            )
+
+            conversations.append({
+                'user_input': user_input,
+                'agent_response': agent_reply,
+                'timestamp': timestamp,
+                'meta_data': chunk_meta
+            })
+
+        return jsonify({
+            'success': True,
+            'ingested_rounds': len(conversations),
+            'conversations': conversations,
+            'videorag_metadata': video_result.metadata,
+            'progress': progress_events
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
