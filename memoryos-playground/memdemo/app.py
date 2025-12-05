@@ -104,7 +104,7 @@ def init_memory():
             openai_base_url=base_url,
             data_storage_path=data_path,
             assistant_id=assistant_id,  # 使用邀请码作为assistant_id
-            short_term_capacity=15,  # Smaller for demo
+            short_term_capacity=100,  # Smaller for demo
             mid_term_capacity=200,   # Smaller for demo
             long_term_knowledge_capacity=1000,  # Smaller for demo
             mid_term_heat_threshold=10.0,

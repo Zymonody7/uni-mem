@@ -15,10 +15,10 @@ ADD_MM_ENDPOINT = f"{SERVER}/add_multimodal_memory"
 def init_memory(session):
     payload = {
         "user_id": "video_user",
-        "api_key": "",
+        "api_key": "sk-7VaFJuGM146a957c4E75T3BlBkFJb7232107783F41C29e00",
         "base_url": "https://api.openai.com/v1",
         "model_name": "gpt-4o-mini",
-        "siliconflow_key": "",
+        "siliconflow_key": "sk-obqoqilbxahjmslkvyyuncxvinhuofzgoxnptaqgnnpxwcmx",
     }
     resp = session.post(SESSION_INIT_ENDPOINT, json=payload, timeout=60)
     resp.raise_for_status()
@@ -34,8 +34,8 @@ def add_video(session, video_path):
         "converter_kwargs": json.dumps({
             "working_dir": "./videorag-workdir",
             "auto_summary": False,
-            "deepseek_key": "",
-            "siliconflow_key": "",
+            "deepseek_key": "sk-49ac078416f84608b8bd709210fa2d93",
+            "siliconflow_key": "sk-obqoqilbxahjmslkvyyuncxvinhuofzgoxnptaqgnnpxwcmx",
         })
     }
     files = {

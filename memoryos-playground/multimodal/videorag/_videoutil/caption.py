@@ -29,19 +29,8 @@ def _to_seconds(t):
         return 0.0
 
 # Import prompt from centralized prompts file
-try:
-    from prompts import VIDEO_STRUCTURED_CAPTION_PROMPT
-    STRUCTURED_PROMPT_TEMPLATE = VIDEO_STRUCTURED_CAPTION_PROMPT
-except ImportError:
-    # Fallback if import fails; keep placeholders for intervals/transcript/focus
-    STRUCTURED_PROMPT_TEMPLATE = (
-        "你是视频逐帧描述助手，请将视觉内容与字幕融合，按帧时间段输出中文时间轴，"
-        "每行格式为`[start -> end] 描述`，描述须包含画面关键信息并结合对应时间的字幕内容。"
-        "{focus_clause}"
-        "\n帧时间段：\n{intervals}\n"
-        "字幕：\n{transcript}\n"
-        "请直接输出时间轴列表，不要额外说明。"
-    )
+from prompts import VIDEO_STRUCTURED_CAPTION_PROMPT
+STRUCTURED_PROMPT_TEMPLATE = VIDEO_STRUCTURED_CAPTION_PROMPT
 
 def encode_video(video, frame_times):
     frames = []
@@ -69,7 +58,7 @@ def _extract_json_from_response(raw_text: str) -> tuple[str, dict]:
         candidate = clean_text
     candidate = candidate.replace("\u200b", "").strip()
     if "{" in candidate and "}" in candidate:
-        candidate = candidate[candidate.find("{") : candidate.rfind("}") + 1]
+        candidate = candidate[candidate.find("{"): candidate.rfind("}") + 1]
     else:
         candidate = ""
 
@@ -245,7 +234,7 @@ def segment_caption(video_name, video_path, segment_index2name, transcripts, seg
             for index in tqdm(segment_index2name, desc=f"Captioning Video {video_name}"):
                 frame_times = segment_times_info[index]["frame_times"]
                 # Coarsen sampling to avoid many near-duplicate frames
-                frame_times = _coarsen_frame_times(frame_times, max_samples=3)
+                frame_times = _coarsen_frame_times(frame_times, max_samples=10)
                 video_frames = encode_video(video, frame_times)
                 segment_transcript = transcripts.get(index, "")
                 start_time, end_time = segment_times_info[index]["timestamp"]
@@ -367,7 +356,7 @@ def merge_segment_information(segment_index2name, segment_times_info, transcript
         caption_metadata["chunk_count_estimate"] = segment_total
         caption_metadata["duration_seconds"] = duration_seconds
         caption_metadata["time_range"] = time_range
-        caption_metadata["transcription_model"] = "faster-distil-whisper-large-v3"
+        caption_metadata["transcription_model"] = "faster-whisper-large-v3-turbo"
 
         inserting_segments[index] = {
             "content": f"Caption:\n{caption_text}\nTranscript:\n{transcript_text}\n\n",
@@ -402,7 +391,7 @@ def retrieved_segment_caption(caption_model, caption_tokenizer, refine_knowledge
         except Exception:
             num_sampled_frames = 3
         frame_times = np.linspace(start, end, num_sampled_frames, endpoint=False).tolist()
-        frame_times = _coarsen_frame_times(frame_times, max_samples=3)
+        frame_times = _coarsen_frame_times(frame_times, max_samples=10)
         video_frames = encode_video(video, frame_times)
         segment_transcript = video_segments._data[video_name][index].get("transcript", "")
         intervals = "\n".join(_format_time_intervals(frame_times))

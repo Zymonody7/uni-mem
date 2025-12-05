@@ -212,6 +212,7 @@ class Updater:
         if current_batch_pages: # Save if any pages were processed
             self.mid_term_memory.save()
 
+
     def update_long_term_from_analysis(self, user_id, profile_analysis_result):
         """
         Updates long-term memory based on the results of a personality/knowledge analysis.

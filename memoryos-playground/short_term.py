@@ -20,7 +20,6 @@ class ShortTermMemory:
             qa_copy["timestamp"] = get_timestamp()
         if "meta_data" not in qa_copy or qa_copy["meta_data"] is None:
             qa_copy["meta_data"] = {}
-        
         self.memory.append(qa_copy)
         print(f"ShortTermMemory: Added QA. User: {qa_pair.get('user_input','')[:30]}...")
         self.save()
